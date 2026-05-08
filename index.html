@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>beiluoshi.men | 北落师门</title>
+
+    <link rel="stylesheet" href="celestial.css">
+    <script src="lib/d3.min.js"></script>
+    <script src="lib/d3.geo.projection.min.js"></script>
+    <script src="celestial.min.js"></script>
+
+    <style>
+        /* 极度纯净的深空背景 */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #03050c;
+            overflow: hidden;
+            font-family: 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', Arial, sans-serif;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        #celestial-map {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            cursor: grab;
+        }
+
+        #celestial-map:active {
+            cursor: grabbing;
+        }
+
+        /* UI 顶层容器，允许穿透点击 */
+        .overlay-ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            animation: fadeIn 2s ease-out forwards;
+        }
+
+        @keyframes fadeIn {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+        /* -------------------------------------
+           顶级审美：域名品牌区重构
+           ------------------------------------- */
+        .brand-header {
+            margin: 40px 0 0 50px;
+            pointer-events: auto;
+            user-select: none;
+        }
+
+        .domain-name {
+            display: flex;
+            align-items: center;
+            font-size: 4rem;
+            font-weight: 200;
+            letter-spacing: 6px;
+            color: rgba(255, 255, 255, 0.95);
+        }
+
+        /* 核心视觉点：把 . 变成闪烁的蓝白恒星 */
+        .star-dot {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            background: #ffffff;
+            border-radius: 50%;
+            margin: 0 15px; /* 中文字体较宽，稍微加大两边的间距 */
+            box-shadow:
+                    0 0 10px #ffffff,
+                    0 0 20px #8ab4f8,
+                    0 0 40px #8ab4f8;
+            animation: pulse-twinkle 3s infinite alternate;
+            position: relative;
+        }
+
+        /* 恒星的十字光学星芒 */
+        .star-dot::before, .star-dot::after {
+            content: '';
+            position: absolute;
+            background: rgba(138, 180, 248, 0.5);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        .star-dot::before { width: 45px; height: 1px; }
+        .star-dot::after { width: 1px; height: 45px; }
+
+        @keyframes pulse-twinkle {
+            0% { transform: scale(0.9); opacity: 0.8; }
+            100% { transform: scale(1.1); opacity: 1; box-shadow: 0 0 15px #ffffff, 0 0 30px #8ab4f8, 0 0 60px #8ab4f8; }
+        }
+
+        .domain-sub {
+            font-size: 1rem;
+            font-weight: 300;
+            letter-spacing: 12px;
+            color: rgba(138, 180, 248, 0.7);
+            margin-top: 8px;
+            text-transform: uppercase;
+            padding-left: 5px;
+        }
+
+        /* -------------------------------------
+           控制面板与按钮 (优化毛玻璃质感)
+           ------------------------------------- */
+        .control-panel {
+            position: absolute;
+            top: 45px;
+            right: 50px;
+            display: flex;
+            gap: 15px;
+            pointer-events: auto;
+        }
+
+        .glass-btn {
+            background: rgba(10, 15, 30, 0.4);
+            color: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(138, 180, 248, 0.2);
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            letter-spacing: 2px;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .glass-btn:hover {
+            background: rgba(138, 180, 248, 0.15);
+            color: #ffffff;
+            border-color: rgba(138, 180, 248, 0.5);
+            box-shadow: 0 8px 25px rgba(138, 180, 248, 0.2);
+            transform: translateY(-2px);
+        }
+
+        /* -------------------------------------
+           动态故事面板
+           ------------------------------------- */
+        .story-panel {
+            position: absolute;
+            right: 50px;
+            top: 110px;
+            width: 380px;
+            background: rgba(5, 8, 15, 0.75);
+            border: 1px solid rgba(138, 180, 248, 0.15);
+            border-radius: 12px;
+            padding: 30px;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            pointer-events: auto;
+            opacity: 0;
+            transform: translateX(30px);
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            visibility: hidden;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+        }
+
+        .story-panel.show {
+            opacity: 1;
+            transform: translateX(0);
+            visibility: visible;
+        }
+
+        .story-title {
+            font-size: 1.8rem;
+            font-weight: 400;
+            color: #ffffff;
+            margin-bottom: 8px;
+            letter-spacing: 3px;
+        }
+
+        .story-meta {
+            font-size: 0.85rem;
+            color: rgba(138, 180, 248, 0.9);
+            margin-bottom: 20px;
+            font-family: Consolas, monospace;
+            border-bottom: 1px solid rgba(138, 180, 248, 0.2);
+            padding-bottom: 12px;
+            line-height: 1.6;
+        }
+
+        .story-content {
+            font-size: 0.95rem;
+            line-height: 1.9;
+            color: rgba(230, 240, 255, 0.75);
+            letter-spacing: 1px;
+        }
+
+        .bottom-hint {
+            text-align: center;
+            margin-bottom: 30px;
+            color: rgba(255, 255, 255, 0.2);
+            font-size: 0.85rem;
+            letter-spacing: 6px;
+        }
+
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            .brand-header { margin: 20px 0 0 20px; }
+            .domain-name { font-size: 2.5rem; }
+            .star-dot { width: 10px; height: 10px; margin: 0 6px; }
+            .control-panel { top: auto; bottom: 80px; right: 20px; flex-direction: column; }
+            .story-panel { right: 20px; top: 100px; width: calc(100% - 100px); padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="celestial-map"></div>
+
+<div class="overlay-ui">
+
+    <div class="brand-header">
+        <div class="domain-name">
+            北落师<span class="star-dot"></span>门
+        </div>
+        <div class="domain-sub">Alpha Piscis Austrini</div>
+    </div>
+
+    <div class="control-panel">
+        <button class="glass-btn" onclick="jumpToStar()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            归位北落师门
+        </button>
+        <button class="glass-btn" onclick="toggleStory()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            观测档案
+        </button>
+    </div>
+
+    <div class="story-panel" id="storyBox">
+        <div class="story-title" id="p-title">北落师门</div>
+        <div class="story-meta" id="p-meta">距离: 25.1光年 | 视星等: 1.16<br>HIP: 113368 | 光谱: A3V</div>
+        <div class="story-content" id="p-content">
+            在中国古代星象中，它被称为“北落师门”，意为天军营垒的北门，是镇守深邃秋季夜空的一位孤勇将领。作为秋季南天最明亮、也最孤独的星，它常被赋予遗世独立的浪漫色彩。<br><br>
+            在西方，它被称为 Fomalhaut，源自阿拉伯语“鱼嘴”。它被古代波斯人尊为镇守天空的“四大王星”之南方守卫。<br><br>
+            时至今日，在现代天文望远镜的凝视下，人们发现它被一个庞大的原行星尘埃环所包围，宛如宇宙深渊中睁开的“索伦之眼”。
+        </div>
+    </div>
+
+    <div class="bottom-hint">任意拖拽以探索星空 • 滚轮无级缩放</div>
+</div>
+
+<script>
+    // 星图引擎配置
+    var config = {
+        width: 0,
+        projection: "stereographic",
+        transform: "equatorial",
+        center: [-15.6, -29.6],
+        zoomlevel: 3.5,
+        zoomextend: 10,
+        interactive: true,
+        controls: false,
+        background: { fill: "#03050c", stroke: "#000000", opacity: 1 },
+        stars: {
+            show: true,
+            limit: 5.5,
+            colors: true,
+            style: { fill: "#ffffff", opacity: 1 },
+            names: true,
+            nameStyle: { fill: "rgba(138, 180, 248, 0.6)", font: "13px 'PingFang SC', sans-serif", align: "left", baseline: "top" },
+            nameLimit: 3.5,
+            propername: true,
+            propernameType: "name"
+        },
+        dsos: { show: false },
+        constellations: {
+            show: true,
+            names: true,
+            desig: false,
+            lines: { show: true, style: { stroke: "rgba(138, 180, 248, 0.2)", width: 1.5, opacity: 0.8 } },
+            bounds: { show: false },
+            namesType: "cn"
+        },
+        mw: { show: true, style: { fill: "#ffffff", opacity: 0.04 } },
+        culture: "cn",
+        datapath: "data/"
+    };
+
+    // 启动星图
+    Celestial.display(config);
+
+    // --- 交互逻辑 ---
+    function jumpToStar() {
+        Celestial.rotate({center: [-15.6, -29.6, 0]});
+    }
+
+    function toggleStory(forceState) {
+        var panel = document.getElementById("storyBox");
+        if (typeof forceState !== 'undefined') {
+            forceState ? panel.classList.add("show") : panel.classList.remove("show");
+        } else {
+            panel.classList.contains("show") ? panel.classList.remove("show") : panel.classList.add("show");
+        }
+    }
+
+    // --- 终极全星空解析雷达 ---
+    var allStarsData = [];
+    var fomalhautStory = document.getElementById("p-content").innerHTML; // 缓存北落师门的专属故事
+
+    // 提前在后台静默拉取星表数据
+    fetch('data/stars.6.json')
+        .then(response => response.json())
+        .then(data => {
+            allStarsData = data.features;
+            console.log("雷达就绪：已载入 " + allStarsData.length + " 颗恒星坐标。");
+        });
+
+    setTimeout(function() {
+        var canvas = document.querySelector('#celestial-map canvas');
+
+        if (canvas) {
+            canvas.addEventListener('click', function(event) {
+                var rect = canvas.getBoundingClientRect();
+                var mouseX = event.clientX - rect.left;
+                var mouseY = event.clientY - rect.top;
+
+                var clickedStar = null;
+                var minDistance = 15; // 命中判定的容错半径
+
+                // 瞬间遍历寻找最近的星体
+                allStarsData.forEach(function(star) {
+                    var coords = star.geometry.coordinates;
+                    if (Celestial.clip(coords)) {
+                        var proj = Celestial.mapProjection(coords);
+                        var distance = Math.sqrt(Math.pow(mouseX - proj[0], 2) + Math.pow(mouseY - proj[1], 2));
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            clickedStar = star;
+                        }
+                    }
+                });
+
+                if (clickedStar) {
+                    var props = clickedStar.properties;
+                    var hipId = props.hip || "未知";
+                    var mag = parseFloat(props.mag).toFixed(2);
+                    // 尝试获取星名，如果没有则显示编号
+                    var starName = props.name || props.desig || ("HIP " + hipId);
+
+                    var pTitle = document.getElementById("p-title");
+                    var pMeta = document.getElementById("p-meta");
+                    var pContent = document.getElementById("p-content");
+
+                    // 检查是否点中了北落师门 (HIP: 113368)
+                    if (hipId === 113368 || starName === "Fomalhaut") {
+                        pTitle.innerText = "北落师门";
+                        pMeta.innerHTML = "距离: 25.1光年 | 视星等: 1.16<br>HIP: 113368 | 光谱: A3V";
+                        pContent.innerHTML = fomalhautStory;
+                    } else {
+                        // 点中其他星体：渲染动态解析数据并剔除 Bug 注释感
+                        pTitle.innerText = starName;
+                        pMeta.innerHTML = "视星等: " + mag + "<br>HIP星表编号: " + hipId;
+                        pContent.innerHTML =
+                            "你已成功锁定这颗星体的空间坐标。<br><br>" +
+                            "<span style='color:rgba(138, 180, 248, 0.8); font-size: 0.85rem;'>" +
+                            "深空数据库连接通道已预留。<br>" +
+                            "等待跨域载入编号 [ <b>" + starName + "</b> ] 的详细观测日志与全息图库..." +
+                            "</span>";
+                    }
+                    toggleStory(true); // 确保面板弹出
+                } else {
+                    // 点击深空区域，收起面板
+                    toggleStory(false);
+                }
+            });
+        }
+    }, 1000);
+</script>
+</body>
+</html>
